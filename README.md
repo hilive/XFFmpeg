@@ -1,3 +1,14 @@
+XFFmpeg
+=============
+## hilive
+* `libavcodec` Add mediacodec to support H264, HEVC and other codecs
+* `libavcodec` 添加 mediacodec ，支持H264、HEVC等编解码
+
+## use
+#### 编码
+
+#### 解码
+
 FFmpeg README
 =============
 
