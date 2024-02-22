@@ -6,8 +6,10 @@ XFFmpeg
 
 ## use
 #### 编码
+avcodec_find_encoder_by_name("h264_hlmediacodec")
 
 #### 解码
+avcodec_find_decoder_by_name("h264_hlmediacodec")
 
 FFmpeg README
 =============
