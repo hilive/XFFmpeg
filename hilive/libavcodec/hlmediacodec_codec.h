@@ -64,8 +64,7 @@ typedef struct {
   uint8_t*          buffer;
   uint32_t          buffer_size;
 
-  bool              in_eof;
-  bool              ou_eof;
+  bool              flushed;
   int64_t           in_pts;
   int64_t           in_duration;
 
@@ -74,6 +73,16 @@ typedef struct {
   int               eof_timeout;
   int               in_timeout_times;
   int               ou_timeout_times;
+
+  int               color_format;
+  int               crop_top;
+  int               crop_bottom;
+  int               crop_left;
+  int               crop_right;
+  int               stride;
+  int               slice_height;
+  int               video_width;
+  int               video_height;
 } HLMediaCodecDecContext;
 
 typedef struct {
@@ -83,10 +92,8 @@ typedef struct {
     bool              inited;
     AMediaFormat*     mediaformat;
     AMediaCodec*      mediacodec;
-    AVFrame*          frame;
 
-    bool              in_eof;
-    bool              ou_eof;
+    bool              flushed;
     int64_t           in_pts;
     int64_t           in_duration;
 
@@ -103,7 +110,7 @@ int hlmediacodec_fill_format(AVCodecContext* avctx, AMediaFormat* mediaformat);
 int hlmediacodec_fill_context(AMediaFormat* mediaformat, AVCodecContext* avctx);
 int hlmediacodec_decode_buffer_to_frame(AVCodecContext* avctx, AMediaCodecBufferInfo bufferinfo, AVFrame* frame);
 int hlmediacodec_encode_header(AVCodecContext* avctx);
-int hlmediacodec_get_buffer_size(AVCodecContext* avctx);
+int hlmediacodec_get_buffer_size(AVCodecContext* avctx, int align);
 void hlmediacodec_show_stats(AVCodecContext* avctx, HLMediaCodecStats stats);
 
 #endif

@@ -1,6 +1,6 @@
 #include "hlmediacodec_codec.h"
-#include "h264_parse.h"
-#include "hevc_parse.h"
+#include "libavcodec/h264_parse.h"
+#include "libavcodec/hevc_parse.h"
 #include <string.h>
 #include <sys/types.h>
 #include "libavutil/frame.h"
@@ -66,8 +66,11 @@ done:
     return ret;
 }
 
-static int hl_h264_set_extradata(AVCodecContext *avctx, AMediaFormat *format)
-{
+static int hl_h264_set_extradata(AVCodecContext *avctx, AMediaFormat *format) {
+    if (!avctx->extradata) {
+        return 0;
+    }
+
     int i;
     int ret;
 
@@ -124,8 +127,11 @@ done:
     return ret;
 }
 
-static int hl_hevc_set_extradata(AVCodecContext *avctx, AMediaFormat *format)
-{
+static int hl_hevc_set_extradata(AVCodecContext *avctx, AMediaFormat *format) {
+    if (!avctx->extradata) {
+        return 0;
+    }
+
     int i;
     int ret;
 
@@ -250,6 +256,247 @@ static int hl_common_set_extradata(AVCodecContext *avctx, AMediaFormat *format) 
     return ret;
 }
 
+#define HL_QCOM_TILE_WIDTH 64
+#define HL_QCOM_TILE_HEIGHT 32
+#define HL_QCOM_TILE_SIZE (HL_QCOM_TILE_WIDTH * HL_QCOM_TILE_HEIGHT)
+#define HL_QCOM_TILE_GROUP_SIZE (4 * HL_QCOM_TILE_SIZE)
+
+static void hl_mediacodec_sw_buffer_copy_yuv420_planar(AVCodecContext *avctx,
+                                                uint8_t *data,
+                                                size_t size,
+                                                AMediaCodecBufferInfo *info,
+                                                AVFrame *frame)
+{
+    HLMediaCodecDecContext *ctx = avctx->priv_data;
+
+    int i;
+    uint8_t *src = NULL;
+
+    for (i = 0; i < 3; i++) {
+        int stride = ctx->stride;
+        int height = 0;
+
+        src = data + info->offset;
+        if (i == 0) {
+            height = avctx->height;
+
+            src += ctx->crop_top * ctx->stride;
+            src += ctx->crop_left;
+        } else {
+            height = avctx->height / 2;
+            stride = (ctx->stride + 1) / 2;
+
+            src += ctx->slice_height * ctx->stride;
+
+            if (i == 2) {
+                src += ((ctx->slice_height + 1) / 2) * stride;
+            }
+
+            src += ctx->crop_top * stride;
+            src += (ctx->crop_left / 2);
+        }
+
+        if (frame->linesize[i] == stride) {
+            memcpy(frame->data[i], src, height * stride);
+        } else {
+            int j, width;
+            uint8_t *dst = frame->data[i];
+
+            if (i == 0) {
+                width = avctx->width;
+            } else if (i >= 1) {
+                width = FFMIN(frame->linesize[i], FFALIGN(avctx->width, 2) / 2);
+            }
+
+            for (j = 0; j < height; j++) {
+                memcpy(dst, src, width);
+                src += stride;
+                dst += frame->linesize[i];
+            }
+        }
+    }
+}
+
+static void hl_mediacodec_sw_buffer_copy_yuv420_semi_planar(AVCodecContext *avctx,
+                                                     uint8_t *data,
+                                                     size_t size,
+                                                     AMediaCodecBufferInfo *info,
+                                                     AVFrame *frame)
+{
+    HLMediaCodecDecContext *ctx = avctx->priv_data;
+
+    int i;
+    uint8_t *src = NULL;
+
+    for (i = 0; i < 2; i++) {
+        int height;
+
+        src = data + info->offset;
+        if (i == 0) {
+            height = avctx->height;
+
+            src += ctx->crop_top * ctx->stride;
+            src += ctx->crop_left;
+        } else if (i == 1) {
+            height = avctx->height / 2;
+
+            src += ctx->slice_height * ctx->stride;
+            src += ctx->crop_top * ctx->stride;
+            src += ctx->crop_left;
+        }
+
+        if (frame->linesize[i] == ctx->stride) {
+            memcpy(frame->data[i], src, height * ctx->stride);
+        } else {
+            int j, width;
+            uint8_t *dst = frame->data[i];
+
+            if (i == 0) {
+                width = avctx->width;
+            } else if (i == 1) {
+                width = FFMIN(frame->linesize[i], FFALIGN(avctx->width, 2));
+            }
+
+            for (j = 0; j < height; j++) {
+                memcpy(dst, src, width);
+                src += ctx->stride;
+                dst += frame->linesize[i];
+            }
+        }
+    }
+}
+
+
+
+static void hl_mediacodec_sw_buffer_copy_yuv420_packed_semi_planar(AVCodecContext *avctx,
+                                                            uint8_t *data,
+                                                            size_t size,
+                                                            AMediaCodecBufferInfo *info,
+                                                            AVFrame *frame)
+{
+    HLMediaCodecDecContext *ctx = avctx->priv_data;
+
+    int i;
+    uint8_t *src = NULL;
+
+    for (i = 0; i < 2; i++) {
+        int height;
+
+        src = data + info->offset;
+        if (i == 0) {
+            height = avctx->height;
+        } else if (i == 1) {
+            height = avctx->height / 2;
+
+            src += (ctx->slice_height - ctx->crop_top / 2) * ctx->stride;
+
+            src += ctx->crop_top * ctx->stride;
+            src += ctx->crop_left;
+        }
+
+        if (frame->linesize[i] == ctx->stride) {
+            memcpy(frame->data[i], src, height * ctx->stride);
+        } else {
+            int j, width;
+            uint8_t *dst = frame->data[i];
+
+            if (i == 0) {
+                width = avctx->width;
+            } else if (i == 1) {
+                width = FFMIN(frame->linesize[i], FFALIGN(avctx->width, 2));
+            }
+
+            for (j = 0; j < height; j++) {
+                memcpy(dst, src, width);
+                src += ctx->stride;
+                dst += frame->linesize[i];
+            }
+        }
+    }
+}
+
+static size_t hl_qcom_tile_pos(size_t x, size_t y, size_t w, size_t h)
+{
+  size_t flim = x + (y & ~1) * w;
+
+  if (y & 1) {
+    flim += (x & ~3) + 2;
+  } else if ((h & 1) == 0 || y != (h - 1)) {
+    flim += (x + 2) & ~3;
+  }
+
+  return flim;
+}
+
+static void hl_mediacodec_sw_buffer_copy_yuv420_packed_semi_planar_64x32Tile2m8ka(AVCodecContext *avctx,
+                                                                           uint8_t *data,
+                                                                           size_t size,
+                                                                           AMediaCodecBufferInfo *info,
+                                                                           AVFrame *frame)
+{
+    HLMediaCodecDecContext *ctx = avctx->priv_data;
+
+    size_t width = frame->width;
+    size_t linesize = frame->linesize[0];
+    size_t height = frame->height;
+
+    const size_t tile_w = (width - 1) / HL_QCOM_TILE_WIDTH + 1;
+    const size_t tile_w_align = (tile_w + 1) & ~1;
+    const size_t tile_h_luma = (height - 1) / HL_QCOM_TILE_HEIGHT + 1;
+    const size_t tile_h_chroma = (height / 2 - 1) / HL_QCOM_TILE_HEIGHT + 1;
+
+    size_t luma_size = tile_w_align * tile_h_luma * HL_QCOM_TILE_SIZE;
+    if((luma_size % HL_QCOM_TILE_GROUP_SIZE) != 0)
+        luma_size = (((luma_size - 1) / HL_QCOM_TILE_GROUP_SIZE) + 1) * HL_QCOM_TILE_GROUP_SIZE;
+
+    for(size_t y = 0; y < tile_h_luma; y++) {
+        size_t row_width = width;
+        for(size_t x = 0; x < tile_w; x++) {
+            size_t tile_width = row_width;
+            size_t tile_height = height;
+            /* dest luma memory index for this tile */
+            size_t luma_idx = y * HL_QCOM_TILE_HEIGHT * linesize + x * HL_QCOM_TILE_WIDTH;
+            /* dest chroma memory index for this tile */
+            /* XXX: remove divisions */
+            size_t chroma_idx = (luma_idx / linesize) * linesize / 2 + (luma_idx % linesize);
+
+            /* luma source pointer for this tile */
+            const uint8_t *src_luma  = data
+                + hl_qcom_tile_pos(x, y,tile_w_align, tile_h_luma) * HL_QCOM_TILE_SIZE;
+
+            /* chroma source pointer for this tile */
+            const uint8_t *src_chroma = data + luma_size
+                + hl_qcom_tile_pos(x, y/2, tile_w_align, tile_h_chroma) * HL_QCOM_TILE_SIZE;
+            if (y & 1)
+                src_chroma += HL_QCOM_TILE_SIZE/2;
+
+            /* account for right columns */
+            if (tile_width > HL_QCOM_TILE_WIDTH)
+                tile_width = HL_QCOM_TILE_WIDTH;
+
+            /* account for bottom rows */
+            if (tile_height > HL_QCOM_TILE_HEIGHT)
+                tile_height = HL_QCOM_TILE_HEIGHT;
+
+            tile_height /= 2;
+            while (tile_height--) {
+                memcpy(frame->data[0] + luma_idx, src_luma, tile_width);
+                src_luma += HL_QCOM_TILE_WIDTH;
+                luma_idx += linesize;
+
+                memcpy(frame->data[0] + luma_idx, src_luma, tile_width);
+                src_luma += HL_QCOM_TILE_WIDTH;
+                luma_idx += linesize;
+
+                memcpy(frame->data[1] + chroma_idx, src_chroma, tile_width);
+                src_chroma += HL_QCOM_TILE_WIDTH;
+                chroma_idx += linesize;
+            }
+            row_width -= HL_QCOM_TILE_WIDTH;
+        }
+        height -= HL_QCOM_TILE_HEIGHT;
+    }
+}
 
 static int hlmediacodec_decode_fill_format(AVCodecContext* avctx, AMediaFormat* mediaformat) {
   hi_logd(avctx, "%s %d", __FUNCTION__, __LINE__);
@@ -354,6 +601,8 @@ int hlmediacodec_fill_format(AVCodecContext* avctx, AMediaFormat* mediaformat) {
 }
 
 int hlmediacodec_fill_context(AMediaFormat* mediaformat, AVCodecContext* avctx) {
+    HLMediaCodecDecContext *ctx = avctx->priv_data;
+
     if (av_codec_is_decoder(avctx->codec)) {
         if (avctx->codec_type == AVMEDIA_TYPE_AUDIO) {
             int media_format = 0;
@@ -382,7 +631,7 @@ int hlmediacodec_fill_context(AMediaFormat* mediaformat, AVCodecContext* avctx) 
                 avctx->channels = media_channel;
             }
         } else if (avctx->codec_type == AVMEDIA_TYPE_VIDEO) {
-            int media_format = 0;
+            int media_color_format = 0;
             int media_width = 0;
             int media_height = 0;
             int media_stride = 0;
@@ -392,7 +641,7 @@ int hlmediacodec_fill_context(AMediaFormat* mediaformat, AVCodecContext* avctx) 
             int media_crop_right = 0;
             int media_slice_height = 0;
 
-            AMediaFormat_getInt32(mediaformat, AMEDIAFORMAT_KEY_COLOR_FORMAT, &media_format);
+            AMediaFormat_getInt32(mediaformat, AMEDIAFORMAT_KEY_COLOR_FORMAT, &media_color_format);
             AMediaFormat_getInt32(mediaformat, AMEDIAFORMAT_KEY_WIDTH, &media_width);
             AMediaFormat_getInt32(mediaformat, AMEDIAFORMAT_KEY_HEIGHT, &media_height);
             AMediaFormat_getInt32(mediaformat, AMEDIAFORMAT_KEY_STRIDE, &media_stride);
@@ -402,15 +651,34 @@ int hlmediacodec_fill_context(AMediaFormat* mediaformat, AVCodecContext* avctx) 
             AMediaFormat_getInt32(mediaformat, "crop-right", &media_crop_right);
             AMediaFormat_getInt32(mediaformat, "slice-height", &media_slice_height);
 
-            hi_logi(avctx, "%s %d mediacodec (format: %d size: [w: %d h: %d s: %d] crop: [t: %d b: %d l: %d r: %d] sliceheight: %d)", 
-                __FUNCTION__, __LINE__, media_format, media_width, media_height, media_stride, media_crop_top, media_crop_bottom, media_crop_left, media_crop_right, media_slice_height);
+            ctx->color_format = media_color_format;
+            ctx->crop_top = media_crop_top;
+            ctx->crop_bottom = media_crop_bottom;
+            ctx->crop_left = media_crop_left;
+            ctx->crop_right = media_crop_right;
+            ctx->stride = media_stride > 0 ? media_stride : media_width;
+            ctx->slice_height = media_slice_height > 0 ? media_slice_height : media_height;
 
-            if (media_format) {
-                avctx->pix_fmt = ff_hlmediacodec_get_pix_fmt((enum FFHlMediaCodecColorFormat)media_format);
+            hi_logi(avctx, "%s %d mediacodec (format: %d size: [w: %d h: %d s: %d] crop: [t: %d b: %d l: %d r: %d] sliceheight: %d) g: (stride: %d slice_height: %d)", 
+                __FUNCTION__, __LINE__, media_color_format, media_width, media_height, media_stride, media_crop_top, media_crop_bottom, media_crop_left, media_crop_right, media_slice_height, 
+                ctx->stride, ctx->slice_height);
+
+            if (media_color_format) {
+                avctx->pix_fmt = ff_hlmediacodec_get_pix_fmt((enum FFHlMediaCodecColorFormat)media_color_format);
             }
 
             if (media_width && media_height) {
-                ff_set_dimensions(avctx, media_width, media_height);
+                if (media_crop_left && media_crop_right) {
+                    media_width = media_crop_right + 1 - media_crop_left;
+                }
+
+                if (media_crop_top && media_crop_bottom) {
+                    media_height = media_crop_bottom + 1 - media_crop_top;
+                }
+
+                // ff_set_dimensions(avctx, media_width, media_height);
+                ctx->video_width = media_width;
+                ctx->video_height = media_height;
             }
         }
     }
@@ -441,26 +709,32 @@ int hlmediacodec_decode_buffer_to_frame(AVCodecContext* avctx, AMediaCodecBuffer
                 break;
             }
         } else if (avctx->codec_type == AVMEDIA_TYPE_VIDEO) {
-            uint32_t frame_data_size = av_image_get_buffer_size((enum AVPixelFormat)frame->format, frame->width, frame->height, 1);
+            hi_logd(avctx, "%s %d, frame: [(width: %d height: %d) linesize: (%d %d %d)], avctx: [(width: %d height: %d) (coded_width: %d coded_height: %d)]"
+                ", decctx: (color_format: %d stride: %d slice_height: %d crop_left: %d crop_right: %d crop_top: %d crop_bottom: %d)", 
+                __FUNCTION__, __LINE__, frame->width, frame->height, frame->linesize[0], frame->linesize[1], frame->linesize[2], 
+                avctx->width, avctx->height, avctx->coded_width, avctx->coded_height, ctx->color_format, ctx->stride, ctx->slice_height, 
+                ctx->crop_left, ctx->crop_right, ctx->crop_top, ctx->crop_bottom);
 
-            if (bufferinfo.size != frame_data_size) {
-                hi_logw(avctx, "%s %d data size unmatch (%u %u)", __FUNCTION__, __LINE__, bufferinfo.size, frame_data_size);
-            }
-
-            if (ctx->buffer_size < frame_data_size) {
-                ret = AVERROR_EXTERNAL;
-                hi_loge(avctx, "%s %d buff size unmatch (%u %u)", __FUNCTION__, __LINE__, ctx->buffer_size, frame_data_size);
+            switch (ctx->color_format)
+            {
+            case COLOR_FormatYUV420Planar:
+                hl_mediacodec_sw_buffer_copy_yuv420_planar(avctx, ctx->buffer, bufferinfo.size, &bufferinfo, frame);
                 break;
-            }
-
-            if ((ret = av_image_fill_linesizes(frame->linesize, (enum AVPixelFormat)frame->format, frame->width)) < 0) {
-                hi_loge(avctx, "%s %d av_image_fill_linesizes fail (%d) format: %d width: %d height: %d", __FUNCTION__, __LINE__, ret, frame->format, frame->width, frame->height);
+            case COLOR_FormatYUV420SemiPlanar:
+            case COLOR_QCOM_FormatYUV420SemiPlanar:
+            case COLOR_QCOM_FormatYUV420SemiPlanar32m:
+                hl_mediacodec_sw_buffer_copy_yuv420_semi_planar(avctx, ctx->buffer, bufferinfo.size, &bufferinfo, frame);
                 break;
-            }
-
-            if ((ret = av_image_fill_arrays(frame->data, frame->linesize, ctx->buffer, (enum AVPixelFormat)frame->format,
-                                            frame->width, frame->height, 1)) < 0) {
-                hi_loge(avctx, "%s %d av_image_fill_arrays fail (%d) format: %d width: %d height: %d", __FUNCTION__, __LINE__, ret, frame->format, frame->width, frame->height);
+            case COLOR_TI_FormatYUV420PackedSemiPlanar:
+            case COLOR_TI_FormatYUV420PackedSemiPlanarInterlaced:
+                hl_mediacodec_sw_buffer_copy_yuv420_packed_semi_planar(avctx, ctx->buffer, bufferinfo.size, &bufferinfo, frame);
+                break;
+            case COLOR_QCOM_FormatYUV420PackedSemiPlanar64x32Tile2m8ka:
+                hl_mediacodec_sw_buffer_copy_yuv420_packed_semi_planar_64x32Tile2m8ka(avctx, ctx->buffer, bufferinfo.size, &bufferinfo, frame);
+                break;
+            default:
+                hi_loge(avctx, "%s %d, Unsupported format: %d", __FUNCTION__, __LINE__, frame->format);
+                ret = AVERROR(EINVAL);
                 break;
             }
         }
@@ -529,22 +803,14 @@ int hlmediacodec_encode_header(AVCodecContext* avctx) {
             break;
         }
 
-        int ou_times = 5;
+        int ou_times = 8;
         bool got_config = false;
-
-        while (!got_config) {
+        while (!got_config && ou_times -- > 0) {
             AMediaCodecBufferInfo bufferInfo;
             int bufferIndex = AMediaCodec_dequeueOutputBuffer(codec, &bufferInfo, ctx->ou_timeout);
             hi_logi(avctx, "%s %d AMediaCodec_dequeueOutputBuffer stats (%d) size: %u offset: %u flags: %u pts: %lld", __FUNCTION__, __LINE__, 
                 bufferIndex, bufferInfo.size, bufferInfo.offset, bufferInfo.flags, bufferInfo.presentationTimeUs);
-            if (bufferIndex == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED || bufferIndex == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED) {
-                continue;
-            } else if (bufferIndex < 0) {
-                if (ou_times -- <= 0) {
-                    hi_loge(avctx, "%s %d Got extradata timeout ", __FUNCTION__, __LINE__);
-                    break;
-                }
-
+            if (bufferIndex < 0) {
                 continue;
             }
 
@@ -595,11 +861,11 @@ int hlmediacodec_encode_header(AVCodecContext* avctx) {
     return ret;
 }
 
-int hlmediacodec_get_buffer_size(AVCodecContext* avctx) {
+int hlmediacodec_get_buffer_size(AVCodecContext* avctx, int align) {
     if (avctx->codec_type == AVMEDIA_TYPE_AUDIO) {
-        return av_samples_get_buffer_size(NULL, avctx->channels, avctx->frame_size, avctx->sample_fmt, 1);
+        return av_samples_get_buffer_size(NULL, avctx->channels, avctx->frame_size, avctx->sample_fmt, align);
     } else if (avctx->codec_type == AVMEDIA_TYPE_VIDEO) {
-        return av_image_get_buffer_size(avctx->pix_fmt, avctx->width, avctx->height, 1);
+        return av_image_get_buffer_size(avctx->pix_fmt, avctx->width, avctx->height, align);
     } else {
         return 0;
     }

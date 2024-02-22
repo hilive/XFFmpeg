@@ -1,12 +1,11 @@
 #include "libavutil/opt.h"
 #include "libavutil/buffer_internal.h"
 #include "libavutil/avassert.h"
-#include "avcodec.h"
-#include "decode.h"
-#include "internal.h"
-#include "h264.h"
-#include "hwconfig.h"
-#include "bsf.h"
+#include "libavcodec/avcodec.h"
+#include "libavcodec/decode.h"
+#include "libavcodec/internal.h"
+#include "libavcodec/h264.h"
+#include "libavcodec/bsf.h"
 #include "hlmediacodec.h"
 #include "hlmediacodec_codec.h"
 
@@ -21,7 +20,7 @@ static av_cold int hlmediacodec_decode_init(AVCodecContext *avctx) {
     do {
         ctx->stats.init_stamp = av_gettime_relative();
 
-        int buff_size = hlmediacodec_get_buffer_size(avctx);
+        int buff_size = hlmediacodec_get_buffer_size(avctx, 1);
         if (buff_size <= 0) {
             ret = AVERROR_EXTERNAL;
             hi_loge(avctx, "hlmediacodec_get_buffer_size fail");
@@ -86,13 +85,18 @@ static int hlmediacodec_dec_send(AVCodecContext *avctx) {
 
     int ret = 0;
     do {
+        if (ctx->flushed) {
+            ret = AVERROR_EOF;
+            break;
+        }
+
         int get_ret = ff_decode_get_packet(avctx, &ctx->packet);
         hi_logd(avctx, "%s %d ff_decode_get_packet ret (%d)", __FUNCTION__, __LINE__, get_ret);
         if (get_ret != 0) {
             ctx->stats.get_fail_cnt ++;
 
             if (get_ret == AVERROR_EOF) {
-                ctx->in_eof = true;// flush
+                ctx->flushed = true;// flush
                 hi_logd(avctx, "%s %d ff_decode_get_packet eof", __FUNCTION__, __LINE__);
             } else {
                 ret = AVERROR(EAGAIN);
@@ -129,7 +133,7 @@ static int hlmediacodec_dec_send(AVCodecContext *avctx) {
                 break;
             }
 
-            if (!ctx->in_eof) {
+            if (!ctx->flushed) {
                 if (ctx->packet.size > in_buffersize) {
                     hi_loge(avctx, "%s %d AMediaCodec_queueInputBuffer codec: %p fail (%u %u)", __FUNCTION__, __LINE__, ctx->mediacodec, ctx->packet.size, in_buffersize);
                     ret = AVERROR_EXTERNAL;
@@ -168,7 +172,7 @@ static int hlmediacodec_dec_recv(AVCodecContext *avctx, AVFrame* frame) {
 
     int ret = 0;
     int ou_times = ctx->ou_timeout_times;
-    int ou_timeout = ctx->in_eof ? ctx->eof_timeout : ctx->ou_timeout;
+    int ou_timeout = ctx->flushed ? ctx->eof_timeout : ctx->ou_timeout;
 
     while (true) {
         -- ou_times;
@@ -249,7 +253,6 @@ static int hlmediacodec_dec_recv(AVCodecContext *avctx, AVFrame* frame) {
 
             if (bufferInfo.flags & HLMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) {
                 frame->pts = frame->pkt_pts = frame->pkt_dts = ctx->in_pts;
-                ctx->ou_eof = true;
                 ctx->stats.ou_succ_end_cnt ++;
                 hi_logi(avctx, "%s %d AMediaCodec_dequeueOutputBuffer HLMEDIACODEC_BUFFER_FLAG_END_OF_STREAM", __FUNCTION__, __LINE__);
                 ret = AVERROR_EOF;
@@ -309,12 +312,8 @@ static av_cold int hlmediacodec_receive_frame(AVCodecContext *avctx, AVFrame* fr
         return AVERROR_EXTERNAL;
     }
 
-    if (ctx->in_eof && ctx->ou_eof) {
-        return AVERROR_EOF;
-    }
-
     int ret = 0;
-    if (!ctx->in_eof) {
+    if (!ctx->flushed) {
         if ((ret = hlmediacodec_dec_send(avctx)) != 0) {
             return ret;
         }
@@ -331,8 +330,7 @@ static av_cold void hlmediacodec_decode_flush(AVCodecContext *avctx) {
         return;
     }
 
-    ctx->in_eof = false;
-    ctx->ou_eof = false;
+    ctx->flushed = false;
     ctx->inited = false;
 
     if (ctx->mediacodec) {
@@ -371,6 +369,7 @@ static av_cold int hlmediacodec_decode_close(AVCodecContext *avctx) {
     hi_logi(avctx, "%s %d", __FUNCTION__, __LINE__);
 
     HLMediaCodecDecContext *ctx = avctx->priv_data;
+    ctx->flushed = false;
     ctx->stats.uint_stamp = av_gettime_relative();
     hlmediacodec_show_stats(avctx, ctx->stats);
    

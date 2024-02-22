@@ -1,7 +1,6 @@
 #include "hlmediacodec.h"
 #include <string.h>
 #include <sys/types.h>
-
 #include "libavutil/frame.h"
 #include "libavutil/mem.h"
 

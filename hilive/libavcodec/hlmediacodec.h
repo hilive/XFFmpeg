@@ -1,6 +1,7 @@
 #ifndef AVCODEC_HLMEDIACODEC_H
 #define AVCODEC_HLMEDIACODEC_H
 #include "libavcodec/avcodec.h"
+#include "libavcodec/hwaccel.h"
 #include "libavutil/pixfmt.h"
 #include "libavutil/time.h"
 #include "libavutil/avutil.h"
