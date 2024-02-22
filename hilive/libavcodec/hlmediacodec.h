@@ -1,3 +1,15 @@
+//
+//
+//  FileName:   hlmediacodec.h
+//  Author:     CortXu
+//  E-mail:     cortxu@gmail.com
+//  Blog:       https://cortxu.com
+//  Github:     https://github.com/hilive
+//
+//  Created on 2021/8/19.
+//  
+//
+
 #ifndef AVCODEC_HLMEDIACODEC_H
 #define AVCODEC_HLMEDIACODEC_H
 #include "libavcodec/avcodec.h"

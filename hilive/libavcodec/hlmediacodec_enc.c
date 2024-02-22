@@ -1,3 +1,15 @@
+//
+//
+//  FileName:   hlmediacodec_enc.c
+//  Author:     CortXu
+//  E-mail:     cortxu@gmail.com
+//  Blog:       https://cortxu.com
+//  Github:     https://github.com/hilive
+//
+//  Created on 2021/8/19.
+//  
+//
+
 #include "libavutil/imgutils.h"
 #include "libavutil/opt.h"
 #include "libavutil/avassert.h"
@@ -349,8 +361,6 @@ AVCodec ff_##short_name##_hlmediacodec_encoder = {                              
     .priv_class     = &ff_##short_name##_hlmediacodec_enc_class,                                        \
     .priv_data_size = sizeof(HLMediaCodecEncContext),                                                   \
     .init           = hlmediacodec_encode_init,                                                         \
-    .send_frame     = hlmediacodec_encode_send_frame,                                                   \
-    .receive_packet = hlmediacodec_encode_receive_packet,                                               \
     .encode2        = hlmediacodec_encode,                                                              \
     .close          = hlmediacodec_encode_close,                                                        \
     .capabilities   = AV_CODEC_CAP_DELAY,                                                               \

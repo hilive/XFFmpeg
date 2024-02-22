@@ -1,3 +1,15 @@
+//
+//
+//  FileName:   hlmediacodec_dec.c
+//  Author:     CortXu
+//  E-mail:     cortxu@gmail.com
+//  Blog:       https://cortxu.com
+//  Github:     https://github.com/hilive
+//
+//  Created on 2021/8/19.
+//  
+//
+
 #include "libavutil/opt.h"
 #include "libavutil/buffer_internal.h"
 #include "libavutil/avassert.h"

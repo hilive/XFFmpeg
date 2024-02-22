@@ -1,3 +1,15 @@
+//
+//
+//  FileName:   hlmediacodec.c
+//  Author:     CortXu
+//  E-mail:     cortxu@gmail.com
+//  Blog:       https://cortxu.com
+//  Github:     https://github.com/hilive
+//
+//  Created on 2021/8/19.
+//  
+//
+
 #include "hlmediacodec.h"
 #include <string.h>
 #include <sys/types.h>

@@ -1,3 +1,15 @@
+//
+//
+//  FileName:   hlmediacodec_codec.c
+//  Author:     CortXu
+//  E-mail:     cortxu@gmail.com
+//  Blog:       https://cortxu.com
+//  Github:     https://github.com/hilive
+//
+//  Created on 2021/8/19.
+//  
+//
+
 #include "hlmediacodec_codec.h"
 #include "libavcodec/h264_parse.h"
 #include "libavcodec/hevc_parse.h"
