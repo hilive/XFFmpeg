@@ -4,12 +4,15 @@ XFFmpeg
 * `libavcodec` Add mediacodec to support H264, HEVC and other codecs
 * `libavcodec` 添加 mediacodec ，支持H264、HEVC等编解码
 
-## use
-#### 编码
+## use（使用）
+#### encode（编码）
 avcodec_find_encoder_by_name("h264_hlmediacodec")
 
-#### 解码
+#### decode（解码）
 avcodec_find_decoder_by_name("h264_hlmediacodec")
+
+## build&demo（编译和demo）
+https://github.com/hilive/ffmpeg-hardcode
 
 FFmpeg README
 =============
