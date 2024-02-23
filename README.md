@@ -6,13 +6,26 @@ XFFmpeg
 
 ## use（使用）
 #### encode（编码）
+hevc
+avcodec_find_encoder_by_name("hevc_hlmediacodec")
+
+h264
 avcodec_find_encoder_by_name("h264_hlmediacodec")
 
 #### decode（解码）
+hevc
 avcodec_find_decoder_by_name("h264_hlmediacodec")
 
-## build&demo（编译和demo）
+h264
+avcodec_find_decoder_by_name("h264_hlmediacodec")
+
+## build script（编译脚本）
 https://github.com/hilive/ffmpeg-hardcode
+
+## demo
+https://github.com/xffmpeg/examples
+
+***
 
 FFmpeg README
 =============
